@@ -8,8 +8,8 @@ To install this project, you can simply run the following command.
 
 ```bash
 # git clone the source code
-git clone https://github.com/sgl-project/SpecForge.git
-cd SpecForge
+git clone https://github.com/hzeng2000/Arbor.git  # (forked from https://github.com/sgl-project/SpecForge.git at commit 953d43a0c1c0f5e32989dc43f91ce5fc2d9ddfef)
+cd Arbor
 
 # create a new virtual environment
 uv venv -p 3.11 --seed
