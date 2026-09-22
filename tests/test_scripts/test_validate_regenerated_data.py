@@ -151,6 +151,17 @@ class TestRegenerationGuards(TestCase):
         self.assertIn("role order", validate_regen_input(bad_order))
         self.assertIn("non-empty string", validate_regen_input(empty_content))
 
+    def test_input_precheck_allows_an_empty_leading_system_message(self):
+        data = {
+            "conversations": [
+                {"role": "system", "content": ""},
+                {"role": "user", "content": "question"},
+                {"role": "assistant", "content": "answer"},
+            ]
+        }
+
+        self.assertIsNone(validate_regen_input(data))
+
     def test_non_object_input_can_be_recorded_as_skipped(self):
         skipped = set_skipped([], "Expected a JSON object")
 

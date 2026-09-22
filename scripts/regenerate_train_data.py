@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import random
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List
 
@@ -75,6 +76,26 @@ def set_skipped(data: Any, error: str) -> Dict[str, Any]:
 def count_lines(path: str) -> int:
     with open(path, encoding="utf-8") as handle:
         return sum(1 for _ in handle)
+
+
+def load_completed_ids(paths: List[str]) -> tuple[Counter[str], Dict[str, int]]:
+    completed_ids: Counter[str] = Counter()
+    counts = {}
+    for path in paths:
+        count = 0
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    data = json.loads(line)
+                    row_id = data.get("id") if isinstance(data, dict) else None
+                    if row_id is None:
+                        raise ValueError(
+                            f"Cannot resume: {path}:{line_number} has no id"
+                        )
+                    completed_ids[str(row_id)] += 1
+                    count += 1
+        counts[path] = count
+    return completed_ids, counts
 
 
 def parse_arguments():
@@ -358,29 +379,25 @@ def main():
     print("-" * 50)
     total_lines = count_lines(args.input_file_path)
 
-    skip_lines = 0
+    existing_samples = 0
+    completed_ids: Counter[str] = Counter()
     error_file_path = args.output_file_path.replace(".jsonl", "_error.jsonl")
     skipped_file_path = args.output_file_path.replace(".jsonl", "_skipped.jsonl")
 
-    if args.resume and os.path.exists(args.output_file_path):
-        existing_success = count_lines(args.output_file_path)
-        existing_error = 0
-        if os.path.exists(error_file_path):
-            existing_error = count_lines(error_file_path)
-        existing_skipped = 0
-        if os.path.exists(skipped_file_path):
-            existing_skipped = count_lines(skipped_file_path)
-        skip_lines = existing_success + existing_error + existing_skipped
+    if args.resume:
+        completed_ids, completed_counts = load_completed_ids(
+            [args.output_file_path, error_file_path, skipped_file_path]
+        )
+        existing_success = completed_counts[args.output_file_path]
+        existing_error = completed_counts[error_file_path]
+        existing_skipped = completed_counts[skipped_file_path]
+        existing_samples = existing_success + existing_error + existing_skipped
         print(f"Resume mode enabled:")
         print(f"  Found {existing_success} successful samples in output file")
         print(f"  Found {existing_error} error samples in error file")
         print(f"  Found {existing_skipped} skipped samples in skipped file")
-        print(f"  Skipping first {skip_lines} input samples")
+        print(f"  Found {existing_samples} processed sample IDs")
         print("-" * 50)
-
-        if skip_lines >= total_lines:
-            print(f"All {total_lines} samples already processed. Nothing to do.")
-            return
 
     # test all server addresses
     valid_server_addresses = []
@@ -407,7 +424,7 @@ def main():
     print("-" * 50)
 
     # Determine file open mode based on resume flag
-    file_mode = "a" if (args.resume and skip_lines > 0) else "w"
+    file_mode = "a" if (args.resume and existing_samples > 0) else "w"
     print(
         f"Regenerating dataset and saving the output to {args.output_file_path} and error log to {error_file_path}"
     )
@@ -436,20 +453,23 @@ def main():
         waiting_queue = {
             server_address: [] for server_address in valid_server_addresses
         }
-        pbar = tqdm(total=total_lines, desc="Processing", initial=skip_lines)
+        pbar = tqdm(total=total_lines, desc="Processing", initial=existing_samples)
         start_server_index = 0
-
-        if skip_lines > 0:
-            print(f"Skipping {skip_lines} already processed samples...")
-            for _ in range(skip_lines):
-                next(input_file, None)
-            print(f"Resuming from sample {skip_lines + 1}")
 
         for line in input_file:
             if args.num_samples is not None and submitted_samples >= args.num_samples:
                 break
 
             data = json.loads(line.strip())
+            if completed_ids:
+                row_id = data.get("id") if isinstance(data, dict) else None
+                if row_id is None:
+                    raise ValueError("Cannot resume: an input sample has no id")
+                row_id = str(row_id)
+                if completed_ids[row_id] > 0:
+                    completed_ids[row_id] -= 1
+                    pbar.update(1)
+                    continue
             invalid_reason = validate_regen_input(data)
             if invalid_reason is not None:
                 skipped_file_handle.write(
@@ -555,15 +575,15 @@ def main():
         print("No successful examples to compute context length statistics.")
 
     total_processed = success_samples + error_samples + skipped_samples
-    if skip_lines > 0:
+    if existing_samples > 0:
         print(f"\nResume processing completed!")
-        print(f"  Previously processed: {skip_lines}")
+        print(f"  Previously processed: {existing_samples}")
         print(
             f"  Newly processed: {total_processed} "
             f"({success_samples} success, {error_samples} failed, "
             f"{skipped_samples} skipped)"
         )
-        print(f"  Total: {skip_lines + total_processed}")
+        print(f"  Total: {existing_samples + total_processed}")
     else:
         print(
             f"\nProcessing completed! {success_samples} samples regenerated, "

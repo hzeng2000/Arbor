@@ -27,6 +27,8 @@ def validate_conversation(
             return f"message {index} must be an object"
         role = message.get("role")
         content = message.get("content")
+        if role == "system" and not saw_user and isinstance(content, str):
+            continue
         if not isinstance(content, str) or not content.strip():
             if error_style == "regeneration":
                 return (
@@ -35,8 +37,6 @@ def validate_conversation(
                 )
             return f"message {index} content must be a non-empty string"
 
-        if role == "system" and not saw_user:
-            continue
         if role not in {"user", "assistant"}:
             if error_style == "regeneration":
                 return f"Invalid message role: {role}"

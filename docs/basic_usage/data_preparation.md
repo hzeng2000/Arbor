@@ -6,13 +6,13 @@ Data is an important aspect of speculative decoding as the quality of the datase
 
 ## ☁️ Canonical Dataset Presets
 
-`scripts/prepare_data.py --dataset NAME` exposes the same 19 text presets
+`scripts/prepare_data.py --dataset NAME` exposes the same 20 text presets
 used by the checked-in recipes:
 
 | Family | Presets |
 | --- | --- |
 | General chat | `ultrachat`, `sharegpt`, `eaglechat`, `perfectblend`, `perfectblend-llama3.1-8b-instruct`, `perfectblend-llama3.3-70b-instruct`, `perfectblend-llama4-scout-instruct`, `perfectblend-llama4-maverick-instruct`, `magpie-qwen2.5-pro-1m-v0.1`, `nebius-llama31-8b-infinity-instruct` |
-| Reasoning, math, and code | `opc`, `gsm8k`, `hendrycks_math`, `math_qa`, `codealpaca-20k`, `opencodeinstruct`, `magicoder-evol-instruct`, `sciq`, `camel` |
+| Reasoning, math, and code | `opc`, `gsm8k`, `hendrycks_math`, `math_qa`, `codealpaca-20k`, `nemotron-v2-non-thinking-codealpaca`, `opencodeinstruct`, `magicoder-evol-instruct`, `sciq`, `camel` |
 
 VLM data preparation and training, including ALLaVA and ShareGPT4V, are not
 supported.

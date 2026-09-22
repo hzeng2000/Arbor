@@ -30,12 +30,18 @@ SUPPORTED_DATASETS = (
     "hendrycks_math",
     "math_qa",
     "codealpaca-20k",
+    "nemotron-v2-non-thinking-codealpaca",
     "opencodeinstruct",
     "magicoder-evol-instruct",
     "sciq",
     "camel",
     "nebius-llama31-8b-infinity-instruct",
 )
+NEMOTRON_V2_NON_THINKING_REPO = (
+    "nvidia/Puzzle-KD-Nemotron-Post-Training-Dataset-v2"
+)
+NEMOTRON_V2_NON_THINKING_REVISION = "7d7a14dbc1ec673e9fad558785d6d2ccd4651fe8"
+CODEALPACA_20K_REVISION = "152bb5e9a29651266b018106053980070a0521a1"
 UNSUPPORTED_VLM_DATASETS = frozenset({"sharegpt4v", "allava4v"})
 DEFAULT_OUTPUT_DIRECTORY = Path(__file__).resolve().parent.parent / "cache" / "dataset"
 SUPPORTED_DATA_PATH_SUFFIXES = {".json", ".jsonl"}
@@ -218,14 +224,25 @@ def process_codealpaca_row(
     prompt_input = row["input"]
     output = row["output"]
     user_content = f"{instruction}\n\n{prompt_input}" if prompt_input else instruction
+    row_id = row["id"] if "id" in row else _stable_id(user_content, output)
     return (
         _conversation_row(
-            _stable_id(user_content, output),
+            row_id,
             user_content,
             output,
         ),
         0,
     )
+
+
+def process_nemotron_v2_non_thinking_row(
+    row: Mapping[str, Any], dataset_name: str | None = None
+) -> ProcessedRow:
+    del dataset_name
+    return {
+        "id": str(row["uuid"]),
+        "conversations": [dict(message) for message in row["messages"]],
+    }, 0
 
 
 def process_opencodeinstruct_row(
@@ -363,6 +380,24 @@ def _indexed(dataset: Any) -> Any:
     return dataset.map(add_index, with_indices=True)
 
 
+def _canonicalize_hf_dataset(
+    dataset: Any,
+    processor: RowProcessor,
+    dataset_name: str,
+    id_prefix: str,
+) -> Any:
+    def convert(row: Mapping[str, Any]) -> dict[str, Any]:
+        converted, _ = processor(row, dataset_name)
+        converted["id"] = f"{id_prefix}{converted['id']}"
+        return converted
+
+    return dataset.map(
+        convert,
+        remove_columns=dataset.column_names,
+        desc=f"Canonicalizing {dataset_name}",
+    )
+
+
 def load_dataset_preset(
     dataset_name: str,
     *,
@@ -466,9 +501,36 @@ def load_dataset_preset(
         )
     if dataset_name == "codealpaca-20k":
         return (
-            _train_split("sahil2801/CodeAlpaca-20k", trust_remote_code=True),
+            _train_split(
+                "sahil2801/CodeAlpaca-20k",
+                revision=CODEALPACA_20K_REVISION,
+            ),
             process_codealpaca_row,
         )
+    if dataset_name == "nemotron-v2-non-thinking-codealpaca":
+        nemotron = _canonicalize_hf_dataset(
+            _load_hf_dataset(
+                NEMOTRON_V2_NON_THINKING_REPO,
+                split="train",
+                revision=NEMOTRON_V2_NON_THINKING_REVISION,
+            ),
+            process_nemotron_v2_non_thinking_row,
+            dataset_name,
+            "nemotron-v2:",
+        )
+        codealpaca = _canonicalize_hf_dataset(
+            _indexed(
+                _load_hf_dataset(
+                    "sahil2801/CodeAlpaca-20k",
+                    split="train",
+                    revision=CODEALPACA_20K_REVISION,
+                )
+            ),
+            process_codealpaca_row,
+            dataset_name,
+            "codealpaca-20k:",
+        )
+        return _concatenate_hf_datasets([nemotron, codealpaca]), _identity_row
     if dataset_name == "opencodeinstruct":
         return (
             _train_split("nvidia/OpenCodeInstruct", trust_remote_code=True),

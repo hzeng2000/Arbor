@@ -25,6 +25,7 @@ class TestPrepareData(unittest.TestCase):
                 "gsm8k",
                 "hendrycks_math",
                 "codealpaca-20k",
+                "nemotron-v2-non-thinking-codealpaca",
                 "camel",
             }.issubset(dataset_action.choices)
         )
@@ -174,6 +175,22 @@ class TestPrepareData(unittest.TestCase):
         )
         self.assertNotEqual(empty_input_row["id"], filled_input_row["id"])
         self.assertEqual(filled_input_row["id"], repeated_row["id"])
+
+    def test_nemotron_v2_conversion_preserves_messages(self):
+        row, skipped = prepare_data.process_nemotron_v2_non_thinking_row(
+            {
+                "uuid": "example-id",
+                "messages": [
+                    {"role": "system", "content": ""},
+                    {"role": "user", "content": "question"},
+                    {"role": "assistant", "content": "answer"},
+                ],
+            }
+        )
+
+        self.assertEqual(0, skipped)
+        self.assertEqual("example-id", row["id"])
+        self.assertEqual("question", row["conversations"][1]["content"])
 
     def test_gsm8k_preset_dispatches_to_its_hosted_dataset(self):
         sentinel_dataset = object()

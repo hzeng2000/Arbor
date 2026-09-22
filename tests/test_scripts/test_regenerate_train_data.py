@@ -1,5 +1,9 @@
+import json
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from scripts.regenerate_train_data import load_completed_ids
 
 from tests.utils import (
     execute_shell_command,
@@ -12,6 +16,24 @@ CACHE_DIR = Path(__file__).parent.parent.parent.joinpath("cache")
 
 
 class TestRegenerateTrainData(unittest.TestCase):
+    def test_resume_loads_completed_ids_across_output_files(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            output = root / "output.jsonl"
+            error = root / "output_error.jsonl"
+            skipped = root / "output_skipped.jsonl"
+            output.write_text(json.dumps({"id": "success"}) + "\n")
+            error.write_text(json.dumps({"id": "error"}) + "\n")
+
+            completed_ids, counts = load_completed_ids(
+                [str(output), str(error), str(skipped)]
+            )
+
+            self.assertEqual({"success": 1, "error": 1}, dict(completed_ids))
+            self.assertEqual(1, counts[str(output)])
+            self.assertEqual(1, counts[str(error)])
+            self.assertEqual(0, counts[str(skipped)])
+
     def test_regenerate_sharegpt(self):
         port = get_available_port()
         data_process = execute_shell_command(
