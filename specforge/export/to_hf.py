@@ -33,6 +33,28 @@ from specforge.export.checkpoint_io import (
 )
 
 
+_DSPARK_SERVING_FIELDS = (
+    "markov_rank",
+    "markov_head_type",
+    "enable_confidence_head",
+    "confidence_head_with_markov",
+    "mask_token_id",
+    "target_layer_ids",
+)
+
+
+def _promote_dspark_serving_fields(config) -> bool:
+    if "DSparkDraftModel" not in (getattr(config, "architectures", None) or ()):
+        return False
+    draft_config = dict(getattr(config, "dflash_config", None) or {})
+    changed = False
+    for field in _DSPARK_SERVING_FIELDS:
+        if field in draft_config and getattr(config, field, None) != draft_config[field]:
+            setattr(config, field, draft_config[field])
+            changed = True
+    return changed
+
+
 def _load_embedding_tensor(source: str, key: str) -> torch.Tensor:
     """Read one target embedding without materializing the target lm_head."""
     root = source if os.path.exists(source) else snapshot_download(repo_id=source)
@@ -113,6 +135,7 @@ def export_to_hf(
             embedding_source, embedding_key
         )
     full_state.update(state["draft_state_dict"])  # trained keys win
+    _promote_dspark_serving_fields(model.config)
     model.save_pretrained(output_dir, state_dict=full_state)
     apply_legacy_rope_scaling(output_dir)
     return output_dir

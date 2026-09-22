@@ -14,10 +14,36 @@ import json
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import torch
 
 CUDA = torch.cuda.is_available()
+
+
+class TestDSparkServingConfig(unittest.TestCase):
+    def test_export_promotes_runtime_fields(self):
+        from specforge.export.to_hf import _promote_dspark_serving_fields
+
+        config = SimpleNamespace(
+            architectures=["DSparkDraftModel"],
+            dflash_config={
+                "markov_rank": 256,
+                "markov_head_type": "vanilla",
+                "enable_confidence_head": True,
+                "confidence_head_with_markov": True,
+                "mask_token_id": 151669,
+                "target_layer_ids": [1, 9, 17, 25, 33],
+            },
+        )
+
+        self.assertTrue(_promote_dspark_serving_fields(config))
+        self.assertEqual(config.markov_rank, 256)
+        self.assertEqual(config.markov_head_type, "vanilla")
+        self.assertTrue(config.enable_confidence_head)
+        self.assertTrue(config.confidence_head_with_markov)
+        self.assertEqual(config.mask_token_id, 151669)
+        self.assertEqual(config.target_layer_ids, [1, 9, 17, 25, 33])
 
 
 class TestRoPEConfigCompatibility(unittest.TestCase):
