@@ -1,0 +1,57 @@
+model:
+  target_model_path: /hzeng/models/Qwen/Qwen3-8B
+  draft_model_config: configs/qwen3-8b-eagle3.json
+  target_backend: sglang
+  trust_remote_code: true
+  embedding_key: model.embed_tokens.weight
+  vocab_mapping_path: cache/vocab_mapping/qwen3-8b-sharegpt-ultrachat-non-thinking.pt
+  torch_dtype: bfloat16
+
+data:
+  train_data_path: ./cache/dataset/sharegpt-ultrachat_train.jsonl
+  max_length: 4096
+  chat_template: qwen3-instruct
+  build_dataset_num_proc: 32
+  cache_dir: ./cache/qwen3-8b-sharegpt-ultrachat-non-thinking
+
+training:
+  strategy: eagle3
+  num_epochs: 10
+  max_steps: 10000
+  batch_size: 1
+  accumulation_steps: 1
+  learning_rate: 0.0001
+  max_grad_norm: 0.5
+  ttt_length: 7
+  attention_backend: flex_attention
+  save_interval: 1000
+  log_interval: 10
+  dist_timeout: 30
+  seed: 42
+
+tracking:
+  report_to: tensorboard
+
+run_id: qwen3-8b-eagle3-non-thinking-20260914
+output_dir: ./outputs/qwen3-8b-eagle3-non-thinking-20260914
+
+deployment:
+  mode: disaggregated
+  trainer:
+    nnodes: 1
+    nproc_per_node: 3
+  disaggregated:
+    control_dir: outputs/qwen3-8b-eagle3-non-thinking-20260914/control
+    consumer_state_dir: outputs/qwen3-8b-eagle3-non-thinking-20260914/consumer-state
+    backend: mooncake
+    managed_local:
+      trainer_cuda_visible_devices: ["5", "6", "7"]
+      mooncake:
+        protocol: tcp
+        global_segment_size_bytes: 34359738368
+        local_buffer_size_bytes: 1073741824
+      capture_servers:
+        - port: 30000
+          cuda_visible_devices: ["4"]
+          tp_size: 1
+          mem_fraction_static: 0.5
