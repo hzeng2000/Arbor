@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
+export PATH="${ROOT_DIR}/.venv/bin:${PATH}"
 
 PYTHON="${ROOT_DIR}/.venv/bin/python"
 SPECFORGE="${ROOT_DIR}/.venv/bin/specforge"
@@ -10,6 +11,16 @@ MODEL=/hzeng/models/Qwen/Qwen3-8B
 INPUT=cache/dataset/nemotron-v2-non-thinking-codealpaca_train.jsonl
 OUTPUT=cache/dataset/qwen3-8b-non-thinking-nemotron-v2-codealpaca-regen.jsonl
 CONFIG=examples/configs/online/disaggregated/managed-local/qwen3-8b-dflash-non-thinking-target-regen-6epoch-dp3.yaml
+
+retry_args=()
+concurrency=64
+if [[ "${1:-}" == "--retry-errors" ]]; then
+    retry_args=(--retry-errors --request-timeout 3600)
+    concurrency=16
+elif [[ $# -gt 0 ]]; then
+    echo "usage: $0 [--retry-errors]" >&2
+    exit 2
+fi
 
 server_pids=()
 stop_servers() {
@@ -51,12 +62,13 @@ done
     --temperature 0 \
     --top-p 0.95 \
     --top-k 20 \
-    --concurrency 64 \
+    --concurrency "${concurrency}" \
     --max-tokens 32768 \
     --server-address 127.0.0.1:31004 127.0.0.1:31005 127.0.0.1:31006 127.0.0.1:31007 \
     --input-file-path "${INPUT}" \
     --output-file-path "${OUTPUT}" \
-    --resume
+    --resume \
+    "${retry_args[@]}"
 
 stop_servers
 server_pids=()

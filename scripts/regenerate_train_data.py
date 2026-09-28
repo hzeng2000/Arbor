@@ -163,6 +163,12 @@ def parse_arguments():
         default=64,
         help="The number of requests to send to a single server concurrently, the total number of concurrent requests is concurrency * number of server addresses",
     )
+    optimization_group.add_argument(
+        "--request-timeout",
+        type=float,
+        default=None,
+        help="OpenAI client request timeout in seconds",
+    )
 
     # data related arguments
     data_group = parser.add_argument_group("data")
@@ -182,6 +188,11 @@ def parse_arguments():
         "--resume",
         action="store_true",
         help="Resume from existing output file, skip already processed samples",
+    )
+    data_group.add_argument(
+        "--retry-errors",
+        action="store_true",
+        help="With --resume, retry rows from the existing error file",
     )
 
     # sglang server
@@ -277,7 +288,13 @@ def call_sglang(
             "dataset regeneration requires the OpenAI client; install "
             "SpecForge's data extra with `pip install 'specforge[data]'`"
         ) from _OPENAI_IMPORT_ERROR
-    client = OpenAI(base_url=f"http://{server_address}/v1", api_key="None")
+    client_kwargs: Dict[str, Any] = dict(
+        base_url=f"http://{server_address}/v1", api_key="None"
+    )
+    request_timeout = getattr(args, "request_timeout", None)
+    if request_timeout is not None:
+        client_kwargs["timeout"] = request_timeout
+    client = OpenAI(**client_kwargs)
 
     messages = data["conversations"]
     regenerated_messages = []
@@ -366,16 +383,22 @@ def main():
 
     if args.max_tokens <= 0:
         raise ValueError("Max tokens must be greater than 0")
+    if args.request_timeout is not None and args.request_timeout <= 0:
+        raise ValueError("Request timeout must be greater than 0")
+    if args.retry_errors and not args.resume:
+        raise ValueError("--retry-errors requires --resume")
 
     print(f"Configuration:")
     print(f"  Model path: {args.model}")
     print(f"  Max tokens: {args.max_tokens}")
     print(f"  Concurrency: {args.concurrency}")
+    print(f"  Request timeout: {args.request_timeout or 'OpenAI default'}")
     print(f"  Temperature: {args.temperature}")
     print(f"  API URL: {args.server_address}")
     print(f"  Input file: {args.input_file_path}")
     print(f"  Output file: {args.output_file_path}")
     print(f"  Resume mode: {args.resume}")
+    print(f"  Retry errors: {args.retry_errors}")
     print("-" * 50)
     total_lines = count_lines(args.input_file_path)
 
@@ -385,18 +408,26 @@ def main():
     skipped_file_path = args.output_file_path.replace(".jsonl", "_skipped.jsonl")
 
     if args.resume:
-        completed_ids, completed_counts = load_completed_ids(
-            [args.output_file_path, error_file_path, skipped_file_path]
-        )
+        completion_paths = [args.output_file_path, skipped_file_path]
+        if not args.retry_errors:
+            completion_paths.insert(1, error_file_path)
+        completed_ids, completed_counts = load_completed_ids(completion_paths)
         existing_success = completed_counts[args.output_file_path]
-        existing_error = completed_counts[error_file_path]
         existing_skipped = completed_counts[skipped_file_path]
-        existing_samples = existing_success + existing_error + existing_skipped
+        existing_error = (
+            count_lines(error_file_path) if os.path.exists(error_file_path) else 0
+        )
+        existing_samples = existing_success + existing_skipped
+        if not args.retry_errors:
+            existing_samples += existing_error
         print(f"Resume mode enabled:")
         print(f"  Found {existing_success} successful samples in output file")
         print(f"  Found {existing_error} error samples in error file")
         print(f"  Found {existing_skipped} skipped samples in skipped file")
-        print(f"  Found {existing_samples} processed sample IDs")
+        if args.retry_errors:
+            print(f"  Retrying {existing_error} error samples")
+        else:
+            print(f"  Found {existing_samples} processed sample IDs")
         print("-" * 50)
 
     # test all server addresses
@@ -424,12 +455,14 @@ def main():
     print("-" * 50)
 
     # Determine file open mode based on resume flag
-    file_mode = "a" if (args.resume and existing_samples > 0) else "w"
+    output_mode = "a" if args.resume else "w"
+    error_mode = "w" if args.retry_errors else output_mode
+    skipped_mode = output_mode
     print(
         f"Regenerating dataset and saving the output to {args.output_file_path} and error log to {error_file_path}"
     )
     print(
-        f"File open mode: {file_mode} ({'append' if file_mode == 'a' else 'overwrite'})"
+        f"File modes: output={output_mode}, error={error_mode}, skipped={skipped_mode}"
     )
     print("-" * 50)
     context_token_sum = 0
@@ -443,9 +476,9 @@ def main():
     # Create progress bar
     with (
         open(args.input_file_path, "r") as input_file,
-        open(args.output_file_path, file_mode) as output_file_handle,
-        open(error_file_path, file_mode) as error_file_handle,
-        open(skipped_file_path, file_mode, encoding="utf-8") as skipped_file_handle,
+        open(args.output_file_path, output_mode) as output_file_handle,
+        open(error_file_path, error_mode) as error_file_handle,
+        open(skipped_file_path, skipped_mode, encoding="utf-8") as skipped_file_handle,
     ):
         executor = ThreadPoolExecutor(
             max_workers=args.concurrency * len(valid_server_addresses)
@@ -453,7 +486,7 @@ def main():
         waiting_queue = {
             server_address: [] for server_address in valid_server_addresses
         }
-        pbar = tqdm(total=total_lines, desc="Processing", initial=existing_samples)
+        pbar = tqdm(total=total_lines, desc="Processing")
         start_server_index = 0
 
         for line in input_file:
